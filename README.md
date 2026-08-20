@@ -92,25 +92,6 @@ caveats stated in the report: the runs have different test sets so this is not
 a controlled comparison, and run-to-run variance is ~±0.015 — so the effusion
 row is noise and the opacity row is not.
 
-### Plus: DICOM in and out, with de-identification that is tested
-
-`src/dicom_io.py` is a hand-rolled Part 10 writer/reader (128-byte preamble,
-`DICM` magic, explicit VR little endian) — pydicom is not installed — and a
-PS3.15 Annex E **Basic Profile** de-identifier with per-patient date *shifting*
-rather than deletion, because intervals carry the clinical meaning.
-
-The tests do the part that matters: `test_deid_survives_a_write_read_cycle`
-writes a de-identified file and greps the **raw bytes on disk** for every
-planted identifier, and `test_deid_removes_every_tag_in_the_basic_profile_list`
-enumerates the removal list instead of spot-checking three tags. Retained tags
-each carry a written reason, because being able to say *why* a tag stays is what
-separates a de-identifier from a delete key.
-
-Burned-in pixel annotation is **not** handled, and the code says so where it is
-called rather than implying coverage.
-
----
-
 ### 5. Which findings survive multiple seeds — the gap this README called its worst
 
 The first build reported the audit from **one** training run and said, in this
@@ -174,6 +155,25 @@ in five would have understated it.
 That is the whole argument for the harness, and it is why the ranges above —
 not the point estimates — are what this pipeline actually supports.
 
+### Plus: DICOM in and out, with de-identification that is tested
+
+`src/dicom_io.py` is a hand-rolled Part 10 writer/reader (128-byte preamble,
+`DICM` magic, explicit VR little endian) — pydicom is not installed — and a
+PS3.15 Annex E **Basic Profile** de-identifier with per-patient date *shifting*
+rather than deletion, because intervals carry the clinical meaning.
+
+The tests do the part that matters: `test_deid_survives_a_write_read_cycle`
+writes a de-identified file and greps the **raw bytes on disk** for every
+planted identifier, and `test_deid_removes_every_tag_in_the_basic_profile_list`
+enumerates the removal list instead of spot-checking three tags. Retained tags
+each carry a written reason, because being able to say *why* a tag stays is what
+separates a de-identifier from a delete key.
+
+Burned-in pixel annotation is **not** handled, and the code says so where it is
+called rather than implying coverage.
+
+---
+
 ## Bugs this harness caught
 
 - **`argmin(|spec − 0.90|)` reported 0% sensitivity at 90% specificity for a
@@ -188,7 +188,7 @@ not the point estimates — are what this pipeline actually supports.
 - **The CAM audit silently dropped pathologies** whose predictions never
   exceeded 0.5, so the table showed one row instead of three.
 
-## What is missing (the other 80%)
+## What is still missing
 
 - **No real data.** No ChestX-ray14, no CheXpert, no radiographs. Every number
   is a property of `src/synth.py`. No comparison to published per-pathology
