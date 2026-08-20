@@ -1,4 +1,4 @@
-# ML-2 — Imaging shortcut-learning audit (first 20%)
+# ML-2 — Imaging shortcut-learning audit (~50% build)
 
 **Not a clinical model, and not trained on radiographs.** It is an audit
 harness with a model attached, built so the audit has ground truth to be
@@ -12,13 +12,14 @@ any of them.
 ```bash
 python train_audit.py                       # patient-level split (~4 min CPU)
 python train_audit.py --split image         # the leak demo
+python seed_study.py --seeds 5              # multi-seed: which findings reproduce
 python write_report.py                      # -> docs/SHORTCUT_AUDIT.md
 python -m pytest tests -q                   # 15 tests
 ```
 
 ---
 
-## The four things worth reading
+## The five things worth reading
 
 ### 1. The audit recovers a planted shortcut it was never told about
 
@@ -110,6 +111,69 @@ called rather than implying coverage.
 
 ---
 
+### 5. Which findings survive multiple seeds — the gap this README called its worst
+
+The first build reported the audit from **one** training run and said, in this
+section, that repeated runs moved opacity AUROC over "roughly 0.73–0.75" and the
+counterfactual effect over "roughly +0.14 to +0.27". That range was eyeballed
+across two runs and stated qualitatively. It was named as *"the single largest
+rigour gap"*, and it was — because a shortcut audit's whole job is to separate a
+real finding from an artefact, and **an audit reported from one seed cannot do
+that for its own findings.**
+
+`seed_study.py` runs the entire pipeline across N seeds (regenerating the data
+*and* retraining each time, so this measures total run-to-run variability, not
+just weight initialisation) and reports what reproduces.
+
+**5 seeds, 500 patients, 16 epochs** — a smaller configuration than the
+single-run audit above, so the absolute AUROCs are not directly comparable to
+it; what transfers is the spread and the verdicts.
+
+| pathology | AUROC (median [min–max]) | vs true state | ECE |
+|---|---|---|---|
+| opacity | 0.794 [0.746–0.808] | 0.987 [0.979–0.996] | 0.157 |
+| cardiomegaly | 0.780 [0.742–0.854] | 1.000 [0.976–1.000] | 0.116 |
+| effusion | 0.815 [0.754–0.891] | 1.000 [1.000–1.000] | 0.145 |
+
+The vs-true column stays near 1.00 **on every seed** while the reported AUROC
+moves by up to 0.14. The label-noise ceiling is therefore a property of the
+labels, not of any particular run — which is itself a finding a single seed
+cannot establish.
+
+**Does the shortcut finding reproduce?**
+
+```
+counterfactual marker effect on P(opacity)
+  median +0.181   range [+0.049, +0.236]   IQR [+0.104, +0.227]
+  effect exceeds +0.02 in 5/5 seeds
+
+Grad-CAM activation on the marker box, over area baseline
+  pathology       median          range      >1.5x in
+  opacity           2.63    [0.94-3.02]           4/5
+  cardiomegaly      0.45    [0.06-0.59]           0/5
+  effusion          0.04    [0.00-0.07]           0/5
+```
+
+**Verdict — all four claims hold:**
+
+| claim | evidence |
+|---|---|
+| the marker causally shifts P(opacity) | 5/5 seeds above +0.02 |
+| opacity attends the marker more than the others do | median 2.63 vs 0.45 and 0.04 |
+| occlusion AUROC barely moves (**the audit blind spot**) | largest median \|delta\| 0.0017 |
+| the label-noise gap is large and stable | vs-true minimum exceeds reported maximum for every pathology |
+
+Two things the spread changes about how the earlier numbers should be read. The
+counterfactual effect ranges **+0.049 to +0.236** — a factor of nearly five — so
+quoting a single run's "+0.135" to three decimals was quoting more precision
+than the pipeline supports. And opacity's marker attention exceeds 1.5× in **4
+of 5** seeds, not 5: the direction is robust, the magnitude is not, and one seed
+in five would have understated it.
+
+**A single-seed audit cannot make any of these calls about its own findings.**
+That is the whole argument for the harness, and it is why the ranges above —
+not the point estimates — are what this pipeline actually supports.
+
 ## Bugs this harness caught
 
 - **`argmin(|spec − 0.90|)` reported 0% sensitivity at 90% specificity for a
@@ -130,9 +194,12 @@ called rather than implying coverage.
   is a property of `src/synth.py`. No comparison to published per-pathology
   AUROC is made, because none would be meaningful.
 - **No DenseNet-121, no transfer learning, no modern-architecture comparison.**
-- **No multi-seed harness.** Single-run point estimates with variance stated
-  qualitatively; the right build reports intervals over seeds. This is the
-  single largest rigour gap.
+- **Seeds vary data and model together.** `seed_study.py` measures total
+  run-to-run variability but cannot say how much comes from the data draw versus
+  weight initialisation. Separating them is the natural next step and is not
+  done.
+- **5 seeds is few.** Enough to say a finding reproduces 5/5 or 4/5; not enough
+  for a real confidence interval on the effect size.
 - **No inference API, no heatmap overlay endpoint, no latency measurement.**
   The spec asks for all three.
 - **Lung "segmentation" is the generator's own mask**, not a segmentation
@@ -153,6 +220,7 @@ called rather than implying coverage.
 | `src/model.py` | small CNN, hand-rolled Grad-CAM |
 | `src/dicom_io.py` | Part 10 writer/reader, PS3.15 Annex E de-identifier |
 | `train_audit.py` | training, operating points, three-method audit, mitigation |
+| `seed_study.py` | multi-seed harness: which findings reproduce, and which were one run |
 | `write_report.py` | JSON → `docs/SHORTCUT_AUDIT.md` |
 | `docs/MODEL_CARD.md` | intended use, shortcut reliance, shift warnings |
 | `tests/test_imaging.py` | 15 tests: split discipline, operating points, de-id |
