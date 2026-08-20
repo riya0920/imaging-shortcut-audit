@@ -1,4 +1,4 @@
-# ML-2 — Imaging shortcut-learning audit (~50% build)
+# ML-2 — Imaging shortcut-learning audit (~80% build)
 
 **Not a clinical model, and not trained on radiographs.** It is an audit
 harness with a model attached, built so the audit has ground truth to be
@@ -14,12 +14,16 @@ python train_audit.py                       # patient-level split (~4 min CPU)
 python train_audit.py --split image         # the leak demo
 python seed_study.py --seeds 5              # multi-seed: which findings reproduce
 python write_report.py                      # -> docs/SHORTCUT_AUDIT.md
-python -m pytest tests -q                   # 15 tests
+python serve.py --register                  # fit + calibrate -> models/
+python serve.py --demo                      # exercise the API end to end
+python serve.py --bench                     # latency percentiles
+python calibration_study.py --seeds 5       # does the calibration finding reproduce?
+python -m pytest tests -q                   # 49 tests
 ```
 
 ---
 
-## The five things worth reading
+## The seven things worth reading
 
 ### 1. The audit recovers a planted shortcut it was never told about
 
@@ -174,6 +178,98 @@ called rather than implying coverage.
 
 ---
 
+### 6. Calibration, and a negative result that cost the headline
+
+The README's own gap list said "no calibration work beyond reporting Brier".
+`src/calibrate.py` adds reliability curves on equal-**count** bins, ECE reported
+with its bin count attached, Murphy's Brier decomposition, and per-pathology
+temperature scaling fitted on a **third** split so the reported ECE is not a
+training metric.
+
+The interesting part was meant to be **stratified** calibration — measuring the
+confounded and unconfounded strata separately, on the theory that a shortcut
+model can look calibrated in aggregate while being wrong where the cue fires.
+One run said exactly that: opacity aggregate ECE 0.127 against a worst stratum
+of 0.198, while effusion — where the audit found no dependency — showed strata
+agreeing within 0.008. A clean story with an internal consistency check.
+
+`calibration_study.py` ran five seeds and took it apart.
+
+| | opacity (shortcut **confirmed**) | effusion (**no** dependency) |
+|---|---|---|
+| aggregate understates worst stratum | **4/5 seeds** | **3/5 seeds** |
+| ratio, median [range] | 2.83 [1.24, 3.30] | 2.02 [1.02, 2.31] |
+| fitted temperature range | [0.944, 2.044] | [0.973, 3.199] |
+
+**The opacity finding does not clear this project's own 5/5 bar**, and worse,
+**the split is not specific to the shortcut** — effusion splits in 3 of 5 seeds
+with no cue dependency to explain it, and the two ratio ranges overlap across
+most of their length. The 0.008 agreement was a draw, not a property.
+
+The likely cause is sample size, not shortcuts: ~120 and ~245 studies across 6
+bins make a per-stratum ECE noisy, and the max of two noisy statistics exceeds
+their pooled value most of the time whether or not an effect exists. The
+temperature range crossing 1.0 says the same thing — even the *direction* of
+the post-hoc correction is unstable.
+
+What survives, at the strength the evidence supports: **stratify the report**,
+because the aggregate understates the worst stratum in 7 of 10 pathology-seed
+combinations and a number that reassures about a subgroup it is not describing
+is this project's whole subject. But a stratum split at this sample size is a
+prompt to look, **not** evidence of a shortcut, and `src/calibrate.py` no longer
+claims otherwise.
+
+This also exposed a reproducibility bug worth naming: `train()` seeds torch
+internally, but `SmallCNN(...)` is constructed **before** that call, so weight
+initialisation ran from unseeded ambient state. Two runs of an apparently-seeded
+pipeline gave different models — opacity's temperature came out 0.620 in one and
+1.346 in the next, flipping the direction of the correction. Seeding at
+construction time fixed it; two consecutive registrations now match exactly.
+
+### 7. A service that ships the audit with every prediction
+
+`serve.py` — `POST /predict`, `POST /predict/dicom`, `POST /overlay`,
+`GET /model`. Three positions:
+
+**Every prediction carries its own audit result.** `src/cues.py` runs the
+shortcut detectors per request, and a prediction on an image carrying a cue the
+audit showed this model depends on comes back flagged, per pathology. A model
+card is a per-*model* statement; the failure is per-*study*. Only the marker
+warns — the audit confirmed that dependency and could not confirm the effusion
+cues, so warning about all three would dilute the one that is earned.
+
+**De-identification runs before inference, and screens the pixels too.**
+`POST /predict/dicom` de-identifies as its first action — score-first-clean-later
+leaves identifiers in memory, logs and crash dumps. The sharper point:
+`dicom_io.deidentify()` says in its own docstring that it does not handle
+burned-in annotation, and **this project's shortcut *is* a burned-in pixel
+annotation**. On a real film that same overlay routinely carries a name, MRN or
+accession number, so a study can pass tag de-identification completely and still
+ship PHI. The cue detector therefore runs twice over — as a shortcut warning and
+as a burned-in-annotation screen — and the response says plainly that it is a
+weak screen and not clearance.
+
+**The Grad-CAM caveat travels in the response header.** `X-Explanation-Caveat`
+on the PNG itself, because an overlay saved out and pasted into a slide deck
+loses every surrounding word.
+
+Latency, measured rather than asserted:
+
+| stage | p50 | p95 | p99 |
+|---|---|---|---|
+| forward pass only | 2.4 ms | 3.9 ms | 4.8 ms |
+| forward + Grad-CAM | 8.7 ms | 10.9 ms | 12.2 ms |
+| full `/overlay` path | 16.2 ms | 20.4 ms | 30.0 ms |
+| `POST /predict` over HTTP | 13.5 ms | 35.2 ms | 37.0 ms |
+
+Grad-CAM costs **3.6× a forward pass** because it needs a backward pass, so the
+overlay endpoint is structurally more expensive than the prediction endpoint —
+capacity planning, not a detail. And the in-process number is **5.6× cheaper**
+than the same work over a socket, which is why it is reported as a floor rather
+than an SLO. Most of that gap is JSON: 4,096 floats as decimal text is a far
+larger payload than the tensor it becomes.
+
+
 ## Bugs this harness caught
 
 - **`argmin(|spec − 0.90|)` reported 0% sensitivity at 90% specificity for a
@@ -200,15 +296,34 @@ called rather than implying coverage.
   done.
 - **5 seeds is few.** Enough to say a finding reproduces 5/5 or 4/5; not enough
   for a real confidence interval on the effect size.
-- **No inference API, no heatmap overlay endpoint, no latency measurement.**
-  The spec asks for all three.
+- **The service is a demonstration, not a deployment.** Single-process stdlib
+  `HTTPServer`, no auth, no TLS, no rate limiting, no request audit log, no
+  batching, no GPU, no ONNX. It moves pixels as JSON, which is the wrong
+  transport and is most of the measured latency.
+- **The latency numbers are a floor, not an SLO.** 64x64 images on a CPU at
+  concurrency 1. A 2048x2048 chest film is ~1000x the pixels, and no load test
+  at a stated concurrency was run.
+- **The cue detectors only work because this project planted the cues.** Three
+  thresholds against known geometry. On real radiographs, burned-in annotations
+  move, vary in font and rotation, and support devices are diagnostically real
+  rather than artefacts — detecting them is its own vision problem, plausibly
+  harder than the classification task.
+- **The burned-in-annotation screen is not OCR** and must not be treated as
+  de-identification clearance. It finds bright shapes in three known regions.
 - **Lung "segmentation" is the generator's own mask**, not a segmentation
   model. On real images this is the hard part and would need a trained
   segmenter, whose errors would then contaminate the in-lung fraction.
 - **Only one mitigation tried**, and it only partly works. Site-shift testing,
   adversarial de-biasing, and retraining on a de-confounded sample are not
   attempted.
-- **No calibration work** beyond reporting Brier.
+- **Calibration is measured but its stratified reading did not reproduce.**
+  4/5 seeds for opacity against this project's 5/5 bar, and the split is not
+  specific to the shortcut — see § 6. Isotonic regression and conformal
+  prediction (what a real deployment would use for a coverage guarantee) are
+  not attempted, and there is no calibration-over-time axis in this generator.
+- **The strata are too small to settle the question.** ~120 and ~245 studies.
+  Resolving whether a stratum split tracks a shortcut needs either a much
+  larger test set or a paired design across seeds, and neither is here.
 - **DICOM support is a demonstration**, not an implementation: no sequences, no
   compressed transfer syntaxes, no conformance statement.
 
@@ -223,4 +338,9 @@ called rather than implying coverage.
 | `seed_study.py` | multi-seed harness: which findings reproduce, and which were one run |
 | `write_report.py` | JSON → `docs/SHORTCUT_AUDIT.md` |
 | `docs/MODEL_CARD.md` | intended use, shortcut reliance, shift warnings |
+| `src/calibrate.py` | reliability, ECE, Brier decomposition, temperature, stratified |
+| `src/cues.py` | shortcut-cue detectors; also the burned-in-annotation screen |
+| `serve.py` | inference API, overlay endpoint, `--register`, `--bench` |
+| `calibration_study.py` | 5 seeds: the study that falsified the § 6 headline |
+| `tests/test_serving.py` | 34 tests: calibration against planted truth, cues, the API |
 | `tests/test_imaging.py` | 15 tests: split discipline, operating points, de-id |

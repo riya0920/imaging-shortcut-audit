@@ -1,0 +1,312 @@
+{
+  "name": "cxr-shortcut-audited",
+  "version": 1,
+  "pathologies": [
+    "opacity",
+    "cardiomegaly",
+    "effusion"
+  ],
+  "image_size": 64,
+  "temperatures": {
+    "opacity": 1.1464132617284353,
+    "cardiomegaly": 2.433232709821335,
+    "effusion": 0.9943085511121419
+  },
+  "calibration": {
+    "opacity": {
+      "temperature": 1.1464132617284353,
+      "direction": "softening overconfident scores",
+      "ece_before": 0.11781948684750358,
+      "ece_after": 0.1124009675578261,
+      "brier_decomposition": {
+        "brier": 0.1584044178018931,
+        "reliability": 0.021243490429973293,
+        "resolution": 0.0729542697763606,
+        "uncertainty": 0.21445847890352057,
+        "recomposed": 0.16274769955713325
+      },
+      "stratified": {
+        "cue_present": {
+          "n": 121,
+          "prevalence": 0.6528925619834711,
+          "mean_predicted": 0.7177279352780265,
+          "ece": 0.11012482137595302,
+          "n_bins": 6,
+          "max_gap": 0.2304293480945065,
+          "reliability_table": [
+            {
+              "bin": 0,
+              "n": 20,
+              "predicted": 0.3094378963793342,
+              "observed": 0.4,
+              "gap": 0.0905621036206658
+            },
+            {
+              "bin": 1,
+              "n": 20,
+              "predicted": 0.5304293480945065,
+              "observed": 0.3,
+              "gap": -0.2304293480945065
+            },
+            {
+              "bin": 2,
+              "n": 20,
+              "predicted": 0.7344864975108711,
+              "observed": 0.65,
+              "gap": -0.08448649751087112
+            },
+            {
+              "bin": 3,
+              "n": 20,
+              "predicted": 0.8446283131682029,
+              "observed": 0.85,
+              "gap": 0.005371686831797118
+            },
+            {
+              "bin": 4,
+              "n": 20,
+              "predicted": 0.91433874327291,
+              "observed": 0.7,
+              "gap": -0.21433874327291003
+            },
+            {
+              "bin": 5,
+              "n": 21,
+              "predicted": 0.9608887714345093,
+              "observed": 1.0,
+              "gap": 0.03911122856549065
+            }
+          ]
+        },
+        "cue_absent": {
+          "n": 245,
+          "prevalence": 0.14285714285714285,
+          "mean_predicted": 0.258569353961037,
+          "ece": 0.1314467555089599,
+          "n_bins": 6,
+          "max_gap": 0.32177486634168895,
+          "reliability_table": [
+            {
+              "bin": 0,
+              "n": 41,
+              "predicted": 0.09932971488730336,
+              "observed": 0.14634146341463414,
+              "gap": 0.04701174852733078
+            },
+            {
+              "bin": 1,
+              "n": 41,
+              "predicted": 0.1455388714067612,
+              "observed": 0.0975609756097561,
+              "gap": -0.04797789579700509
+            },
+            {
+              "bin": 2,
+              "n": 40,
+              "predicted": 0.1784705058030361,
+              "observed": 0.025,
+              "gap": -0.15347050580303612
+            },
+            {
+              "bin": 3,
+              "n": 41,
+              "predicted": 0.22422601984206228,
+              "observed": 0.21951219512195122,
+              "gap": -0.0047138247201110595
+            },
+            {
+              "bin": 4,
+              "n": 41,
+              "predicted": 0.3362200760181014,
+              "observed": 0.12195121951219512,
+              "gap": -0.21426885650590627
+            },
+            {
+              "bin": 5,
+              "n": 41,
+              "predicted": 0.5656773053660792,
+              "observed": 0.24390243902439024,
+              "gap": -0.32177486634168895
+            }
+          ]
+        },
+        "aggregate": {
+          "n": 366,
+          "ece": 0.10561776272292893,
+          "n_bins": 6,
+          "max_gap": 0.19765455476975635
+        },
+        "verdict": {
+          "aggregate_ece": 0.10561776272292893,
+          "worst_stratum_ece": 0.1314467555089599,
+          "absolute_gap": 0.02582899278603097,
+          "ratio": 1.2445515992777574,
+          "reading": "the strata are calibrated similarly; the aggregate is not hiding a stratum here"
+        }
+      }
+    },
+    "cardiomegaly": {
+      "temperature": 2.433232709821335,
+      "direction": "softening overconfident scores",
+      "ece_before": 0.1480905667945801,
+      "ece_after": 0.11765944612513299,
+      "brier_decomposition": {
+        "brier": 0.1250926184025859,
+        "reliability": 0.031077578048043314,
+        "resolution": 0.08742708712474906,
+        "uncertainty": 0.18403804234226165,
+        "recomposed": 0.1276885332655559
+      },
+      "stratified": {
+        "note": "no confound was planted for this pathology"
+      }
+    },
+    "effusion": {
+      "temperature": 0.9943085511121419,
+      "direction": "already calibrated (T is approximately 1)",
+      "ece_before": 0.15195773199933474,
+      "ece_after": 0.15133836771380416,
+      "brier_decomposition": {
+        "brier": 0.1384658680770503,
+        "reliability": 0.032834851465526886,
+        "resolution": 0.07774698912833822,
+        "uncertainty": 0.188181193824838,
+        "recomposed": 0.14326905616202668
+      },
+      "stratified": {
+        "cue_present": {
+          "n": 114,
+          "prevalence": 0.4824561403508772,
+          "mean_predicted": 0.626720809454565,
+          "ece": 0.1442646691036878,
+          "n_bins": 6,
+          "max_gap": 0.2788730564282276,
+          "reliability_table": [
+            {
+              "bin": 0,
+              "n": 19,
+              "predicted": 0.2247951335536546,
+              "observed": 0.21052631578947367,
+              "gap": -0.01426881776418093
+            },
+            {
+              "bin": 1,
+              "n": 19,
+              "predicted": 0.33527687979720544,
+              "observed": 0.15789473684210525,
+              "gap": -0.17738214295510019
+            },
+            {
+              "bin": 2,
+              "n": 19,
+              "predicted": 0.4367677932703328,
+              "observed": 0.15789473684210525,
+              "gap": -0.2788730564282276
+            },
+            {
+              "bin": 3,
+              "n": 19,
+              "predicted": 0.8427849776737498,
+              "observed": 0.631578947368421,
+              "gap": -0.2112060303053288
+            },
+            {
+              "bin": 4,
+              "n": 19,
+              "predicted": 0.9494064766053213,
+              "observed": 0.7894736842105263,
+              "gap": -0.15993279239479496
+            },
+            {
+              "bin": 5,
+              "n": 19,
+              "predicted": 0.9712935958271259,
+              "observed": 0.9473684210526315,
+              "gap": -0.023925174774494407
+            }
+          ]
+        },
+        "cue_absent": {
+          "n": 252,
+          "prevalence": 0.14682539682539683,
+          "mean_predicted": 0.3013637710533012,
+          "ece": 0.15453837422790442,
+          "n_bins": 6,
+          "max_gap": 0.29375623067244544,
+          "reliability_table": [
+            {
+              "bin": 0,
+              "n": 42,
+              "predicted": 0.12616117306657942,
+              "observed": 0.09523809523809523,
+              "gap": -0.03092307782848419
+            },
+            {
+              "bin": 1,
+              "n": 42,
+              "predicted": 0.18064075928678508,
+              "observed": 0.07142857142857142,
+              "gap": -0.10921218785821366
+            },
+            {
+              "bin": 2,
+              "n": 42,
+              "predicted": 0.2245325735858824,
+              "observed": 0.09523809523809523,
+              "gap": -0.12929447834778718
+            },
+            {
+              "bin": 3,
+              "n": 42,
+              "predicted": 0.2771160338814306,
+              "observed": 0.16666666666666666,
+              "gap": -0.11044936721476392
+            },
+            {
+              "bin": 4,
+              "n": 42,
+              "predicted": 0.3488329986838275,
+              "observed": 0.09523809523809523,
+              "gap": -0.25359490344573227
+            },
+            {
+              "bin": 5,
+              "n": 42,
+              "predicted": 0.6508990878153026,
+              "observed": 0.35714285714285715,
+              "gap": -0.29375623067244544
+            }
+          ]
+        },
+        "aggregate": {
+          "n": 366,
+          "ece": 0.15133836771380424,
+          "n_bins": 6,
+          "max_gap": 0.35610431773926254
+        },
+        "verdict": {
+          "aggregate_ece": 0.15133836771380424,
+          "worst_stratum_ece": 0.15453837422790442,
+          "absolute_gap": 0.0032000065141001843,
+          "ratio": 1.0211447140764178,
+          "reading": "the strata are calibrated similarly; the aggregate is not hiding a stratum here"
+        }
+      }
+    }
+  },
+  "split": {
+    "train_studies": 1059,
+    "val_studies": 365,
+    "test_studies": 366,
+    "level": "patient"
+  },
+  "audited_dependencies": [
+    "marker"
+  ],
+  "audit": {
+    "finding": "The opacity head depends on the laterality marker. Removing the marker from marker-positive studies moved the opacity score by a median of +0.181 (5 of 5 seeds > +0.02); marker-box activation runs 2.63x the baseline. See docs/SHORTCUT_AUDIT.md.",
+    "cardiomegaly": "no cue dependency demonstrated",
+    "effusion": "cue dependency weak and not confirmed across seeds"
+  },
+  "intended_use": "Research demonstration of a shortcut audit on SYNTHETIC chest radiographs. NOT a diagnostic device, not cleared for clinical use, never trained on a real radiograph, and not validated on any human data. The opacity head is KNOWN to depend on an acquisition artefact rather than on anatomy."
+}
