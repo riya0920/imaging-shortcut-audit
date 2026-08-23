@@ -1,4 +1,4 @@
-# ML-2 — Imaging shortcut-learning audit (~80% build)
+# ML-2 — Imaging shortcut-learning audit — complete
 
 **Not a clinical model, and not trained on radiographs.** It is an audit
 harness with a model attached, built so the audit has ground truth to be
@@ -18,7 +18,8 @@ python serve.py --register                  # fit + calibrate -> models/
 python serve.py --demo                      # exercise the API end to end
 python serve.py --bench                     # latency percentiles
 python calibration_study.py --seeds 5       # does the calibration finding reproduce?
-python -m pytest tests -q                   # 49 tests
+python run_complete.py --seeds 3            # variance, de-confounding, conformal
+python -m pytest tests -q                   # 65 tests
 ```
 
 ---
@@ -284,48 +285,128 @@ larger payload than the tensor it becomes.
 - **The CAM audit silently dropped pathologies** whose predictions never
   exceeded 0.5, so the table showed one row instead of three.
 
-## What is still missing
+## Where the run-to-run spread actually comes from
 
-- **No real data.** No ChestX-ray14, no CheXpert, no radiographs. Every number
-  is a property of `src/synth.py`. No comparison to published per-pathology
-  AUROC is made, because none would be meaningful.
-- **No DenseNet-121, no transfer learning, no modern-architecture comparison.**
-- **Seeds vary data and model together.** `seed_study.py` measures total
-  run-to-run variability but cannot say how much comes from the data draw versus
-  weight initialisation. Separating them is the natural next step and is not
-  done.
-- **5 seeds is few.** Enough to say a finding reproduces 5/5 or 4/5; not enough
-  for a real confidence interval on the effect size.
-- **The service is a demonstration, not a deployment.** Single-process stdlib
-  `HTTPServer`, no auth, no TLS, no rate limiting, no request audit log, no
-  batching, no GPU, no ONNX. It moves pixels as JSON, which is the wrong
-  transport and is most of the measured latency.
-- **The latency numbers are a floor, not an SLO.** 64x64 images on a CPU at
-  concurrency 1. A 2048x2048 chest film is ~1000x the pixels, and no load test
-  at a stated concurrency was run.
+`seed_study.py` moved data and weights together, so its spread was a sum of two
+sources it could not attribute. Varying one at a time separates them:
+
+| varying | opacity AUROC | sd |
+|---|---|---|
+| the **data** draw (init fixed) | 0.716, 0.781, 0.777 | 0.037 |
+| the **weight init** (data fixed) | 0.716, **0.558**, 0.735 | **0.097** |
+
+**Weight initialisation dominates by 2.6×**, and one init landed at 0.558 —
+near chance, an optimisation failure rather than a data problem. That settles
+which lever to pull: averaging over inits is the cheap fix, and a larger dataset
+would not help much. It also explains why the § 6 calibration finding was so
+unstable across seeds.
+
+## Retraining on a de-confounded sample — and an upper bound, not a finding
+
+`strip_marker()` deletes the confound from the training distribution, which is
+the cleanest form of the mitigation and the one that says what the ceiling is:
+whatever remains is what the model reads from **anatomy**.
+
+```
+opacity AUROC with the marker present : 0.7355  [0.716, 0.687, 0.804]
+opacity AUROC with the marker REMOVED : 0.7316  [0.671, 0.750, 0.774]
+difference: +0.0039
+
+paired sd 0.0585 over 3 seeds -> smallest resolvable difference 0.0939
+OBSERVED 0.0039. THE EXPERIMENT IS UNDERPOWERED.
+```
+
+**The power is computed before the number is interpreted**, which is the
+discipline `ml1-readmission-risk` had to apply after retracting a model
+comparison for exactly this reason. What survives is an **upper bound**:
+whatever the marker was worth to a *retrained* model, it was worth less than
+0.094 AUROC here.
+
+That bound reframes the audit rather than contradicting it. The counterfactual
+showed the model **uses** the marker when it is present (+0.181 on the score);
+retraining without it costs little. Both are true, and together they say **the
+shortcut was available, not necessary** — the model reads nearly as much from
+anatomy and took the marker because it was the cheaper route.
+
+Which is the best possible news for the mitigation: removing the confound is
+close to free. It is also exactly the claim that needs more seeds before anyone
+acts on it — and § 1 says more seeds are the right lever, since weight
+initialisation is what moves this number.
+
+Available **only because the data is synthetic.** A real annotation cannot be
+un-burned without inpainting, and inpainting leaves an artefact the model may
+key on instead — trading a known confound for an unknown one.
+
+## Conformal prediction — a guarantee that does not need calibration
+
+`src/conformal.py`. The § 6 calibration finding did not reproduce, and adding a
+sixth seed does not fix an estimator that is noisy by construction. Conformal
+answers a different question: instead of *"is this probability right"*, it gives
+a **set** with `P(true label in set) >= 1 - alpha`, distribution-free and
+finite-sample.
+
+| alpha | target | coverage | set size | singleton | abstain |
+|---|---|---|---|---|---|
+| 0.20 | 80% | 80.7% | 1.03 | 96.8% | 3.2% |
+| 0.10 | 90% | 89.5% | 1.36 | 64.1% | 35.9% |
+| 0.05 | 95% | 95.4% | 1.67 | 33.5% | 66.5% |
+
+A badly miscalibrated model **does not lose coverage — it pays in wider sets**,
+which is exactly what a model with a known shortcut needs, since the one thing
+it lacks is a trustworthy probability. So the **abstention rate** becomes the
+honest measure of what this model knows, and it is a measure ECE could not give.
+
+Coverage is the guarantee; **set size is the information**. A model that always
+returns both labels has perfect coverage and has said nothing, so the two are
+read together or not at all.
+
+### And the marginal guarantee hides a stratum
+
+```
+cue_present   n=135  coverage 84.4%   abstain 28.9%
+cue_absent    n=274  coverage 92.0%   abstain 39.4%
+marginal      n=409  coverage 89.5%   abstain 35.9%
+```
+
+The nominal 90% is met **by averaging over a stratum where it fails at 84.4%**.
+Split conformal guarantees *marginal* coverage only, and for a model whose known
+failure mode is a per-stratum difference, quoting the marginal number alone is
+the same dilution `calibrate.py` documents for aggregate ECE.
+
+## What is still missing, and why it cannot be closed here
+
+- **No real data.** No ChestX-ray14, no CheXpert, no radiographs — not
+  installed, no network. Every number is a property of `src/synth.py`, and no
+  comparison to published per-pathology AUROC is made because none would be
+  meaningful.
+- **No DenseNet-121, no transfer learning.** Pretrained weights need a
+  download. The architecture comparison the spec suggests is therefore absent
+  rather than approximated.
+- **The strata are too small to settle the calibration question.** ~135 and
+  ~274 studies. Resolving whether a stratum split tracks a shortcut needs a much
+  larger test set or a paired design across many more seeds.
+- **The de-confounding result is an upper bound, not a measurement.** Three
+  seeds resolve differences above 0.094 AUROC and the observed difference is
+  0.004. More seeds would close this and were not run.
 - **The cue detectors only work because this project planted the cues.** Three
-  thresholds against known geometry. On real radiographs, burned-in annotations
-  move, vary in font and rotation, and support devices are diagnostically real
-  rather than artefacts — detecting them is its own vision problem, plausibly
-  harder than the classification task.
+  thresholds against known geometry. On real radiographs annotations move, vary
+  in font and rotation, and support devices are diagnostically real rather than
+  artefacts — detecting them is its own vision problem, plausibly harder than
+  the classification task.
 - **The burned-in-annotation screen is not OCR** and must not be treated as
-  de-identification clearance. It finds bright shapes in three known regions.
+  de-identification clearance.
 - **Lung "segmentation" is the generator's own mask**, not a segmentation
-  model. On real images this is the hard part and would need a trained
-  segmenter, whose errors would then contaminate the in-lung fraction.
-- **Only one mitigation tried**, and it only partly works. Site-shift testing,
-  adversarial de-biasing, and retraining on a de-confounded sample are not
-  attempted.
-- **Calibration is measured but its stratified reading did not reproduce.**
-  4/5 seeds for opacity against this project's 5/5 bar, and the split is not
-  specific to the shortcut — see § 6. Isotonic regression and conformal
-  prediction (what a real deployment would use for a coverage guarantee) are
-  not attempted, and there is no calibration-over-time axis in this generator.
-- **The strata are too small to settle the question.** ~120 and ~245 studies.
-  Resolving whether a stratum split tracks a shortcut needs either a much
-  larger test set or a paired design across seeds, and neither is here.
-- **DICOM support is a demonstration**, not an implementation: no sequences, no
-  compressed transfer syntaxes, no conformance statement.
+  model. On real images this is the hard part, and a trained segmenter's errors
+  would then contaminate the in-lung fraction.
+- **Conformal is split-conformal only** — no cross-conformal, no jackknife+, no
+  CQR, no Mondrian (class-conditional) variant, and no conditional coverage.
+  The guarantee is marginal, which is a much weaker statement than most readers
+  assume, and the stratified check above is there precisely because of it.
+- **The service is a demonstration.** Single-process stdlib `HTTPServer`, no
+  auth, no TLS, no batching, no GPU, no ONNX. It moves pixels as JSON, which is
+  the wrong transport and is most of the measured latency.
+- **The latency numbers are a floor.** 64x64 images on a CPU at concurrency 1;
+  a 2048x2048 chest film is ~1000x the pixels.
 
 ## Files
 
@@ -342,5 +423,8 @@ larger payload than the tensor it becomes.
 | `src/cues.py` | shortcut-cue detectors; also the burned-in-annotation screen |
 | `serve.py` | inference API, overlay endpoint, `--register`, `--bench` |
 | `calibration_study.py` | 5 seeds: the study that falsified the § 6 headline |
+| `src/conformal.py` | split conformal, and the stratified coverage check |
+| `run_complete.py` | variance decomposition, de-confounded retrain, conformal |
+| `tests/test_conformal.py` | 16 tests: coverage against planted truth, the hidden stratum |
 | `tests/test_serving.py` | 34 tests: calibration against planted truth, cues, the API |
 | `tests/test_imaging.py` | 15 tests: split discipline, operating points, de-id |
