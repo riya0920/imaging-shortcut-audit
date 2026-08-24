@@ -19,7 +19,8 @@ python serve.py --demo                      # exercise the API end to end
 python serve.py --bench                     # latency percentiles
 python calibration_study.py --seeds 5       # does the calibration finding reproduce?
 python run_complete.py --seeds 3            # variance, de-confounding, conformal
-python -m pytest tests -q                   # 65 tests
+python -m pytest tests -q                   # 72 tests
+python validate_dicom.py                    # interop vs pydicom -> docs/
 ```
 
 ---
@@ -163,7 +164,8 @@ not the point estimates — are what this pipeline actually supports.
 ### Plus: DICOM in and out, with de-identification that is tested
 
 `src/dicom_io.py` is a hand-rolled Part 10 writer/reader (128-byte preamble,
-`DICM` magic, explicit VR little endian) — pydicom is not installed — and a
+`DICM` magic, explicit VR little endian) — written by hand rather than with
+pydicom, and now **checked against it** (below) — and a
 PS3.15 Annex E **Basic Profile** de-identifier with per-patient date *shifting*
 rather than deletion, because intervals carry the clinical meaning.
 
@@ -373,6 +375,54 @@ Split conformal guarantees *marginal* coverage only, and for a model whose known
 failure mode is a per-stratum difference, quoting the marginal number alone is
 the same dilution `calibrate.py` documents for aggregate ECE.
 
+## The DICOM code is checked against `pydicom`, in both directions
+
+The gap list used to excuse the hand-rolled Part 10 code by saying pydicom was
+"not installed". That was wrong, and the excuse hid the real weakness: **a
+writer tested only by its own reader proves almost nothing.** Two consistent
+misreadings of the standard agree with each other perfectly, and the bugs live
+exactly where the encoder and decoder share an assumption.
+
+| direction | result |
+|---|---|
+| `pydicom` reads a file **this** wrote | passes — transfer syntax `1.2.840.10008.1.2.1`, pixel array identical |
+| **this** reads a file `pydicom` wrote | passes — 8,794 bytes, pixel array identical |
+
+The second is the one that matters. A parser exercised only against its own
+writer never meets a construct that writer does not emit.
+
+### De-identification, re-checked by an independent parser
+
+| check | result |
+|---|---|
+| tags carrying a non-empty value | **none** |
+| original PHI values anywhere in the parsed dataset | **none** |
+| `StudyDate` shifted rather than removed | yes |
+| interval between two studies preserved | yes — 74 days before, 74 after |
+
+The existing byte-grep test stays: it is the stronger check for *is this string
+gone*. This adds the stronger check for *is this tag carrying anything* — a
+value can survive re-encoded, which a grep for the original bytes would miss.
+
+### And it found one thing worth fixing
+
+`deidentify()` applies a **single action** to everything in
+`BASIC_PROFILE_REMOVE`: set the value to zero length. PS3.15 Annex E assigns
+actions **per tag**, and the set includes both **X** (remove the tag entirely)
+and **Z** (retain it with a zero-length value).
+
+Uniform Z is **privacy-equivalent for the value** — which is why nothing leaks
+— but it is **not exactly conformant**, because a tag whose assigned action is
+X should be *absent*, and a conformance checker would flag it as present. The
+constant is also named `..._REMOVE` while implementing retain-and-zero, which
+is the kind of naming that makes a reviewer believe the wrong thing.
+
+**This is deliberately not fixed here.** Fixing it means asserting the correct
+per-tag action for seventeen tags, and the authority for that is the PS3.15
+Annex E attribute table, which is not available offline. Guessing from memory
+and calling the result "conformant" is exactly the unearned claim this project
+exists to avoid. It is recorded as a specific, closeable gap instead.
+
 ## What is still missing, and why it cannot be closed here
 
 - **No real data.** No ChestX-ray14, no CheXpert, no radiographs — not
@@ -425,6 +475,8 @@ the same dilution `calibrate.py` documents for aggregate ECE.
 | `calibration_study.py` | 5 seeds: the study that falsified the § 6 headline |
 | `src/conformal.py` | split conformal, and the stratified coverage check |
 | `run_complete.py` | variance decomposition, de-confounded retrain, conformal |
+| `validate_dicom.py` | pydicom interop both directions; found the uniform-Z gap |
+| `tests/test_dicom_interop.py` | 7 tests, incl. reading a file pydicom wrote |
 | `tests/test_conformal.py` | 16 tests: coverage against planted truth, the hidden stratum |
 | `tests/test_serving.py` | 34 tests: calibration against planted truth, cues, the API |
 | `tests/test_imaging.py` | 15 tests: split discipline, operating points, de-id |
