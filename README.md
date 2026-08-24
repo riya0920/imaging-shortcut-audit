@@ -1,4 +1,4 @@
-# ML-2 — Imaging shortcut-learning audit — complete
+# ML-2 — Imaging shortcut-learning audit — working system, 10 known gaps
 
 **Not a clinical model, and not trained on radiographs.** It is an audit
 harness with a model attached, built so the audit has ground truth to be
