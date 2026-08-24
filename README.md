@@ -19,7 +19,8 @@ python serve.py --demo                      # exercise the API end to end
 python serve.py --bench                     # latency percentiles
 python calibration_study.py --seeds 5       # does the calibration finding reproduce?
 python run_complete.py --seeds 3            # variance, de-confounding, conformal
-python -m pytest tests -q                   # 72 tests
+python -m pytest tests -q                   # 82 tests
+python power.py                             # what closing the gap would cost
 python validate_dicom.py                    # interop vs pydicom -> docs/
 ```
 
@@ -423,6 +424,58 @@ Annex E attribute table, which is not available offline. Guessing from memory
 and calling the result "conformant" is exactly the unearned claim this project
 exists to avoid. It is recorded as a specific, closeable gap instead.
 
+## "More seeds would close this" was wrong, and here is the arithmetic
+
+The gap list carried this line for a long time:
+
+> Three seeds resolve differences above 0.094 AUROC and the observed difference
+> is 0.004. **More seeds would close this and were not run.**
+
+That last sentence is a claim about **feasibility**, and nobody had checked it.
+It reads like *we could not be bothered*. `python power.py` works out what it
+would actually take.
+
+The study's own minimum detectable difference is `MDD = 2.78 · sd / √n`, so
+resolving an effect of size *d* needs `n = (2.78 · sd / d)²`. With the measured
+paired sd of **0.0585** and an observed difference of **0.0039**:
+
+| seeds | MDD | compute | resolves? |
+|---|---|---|---|
+| 3 (what was run) | 0.0939 | 0.3 h | no |
+| 25 | 0.0325 | 2.4 h | no |
+| 100 | 0.0163 | 9.7 h | no |
+| 1000 | 0.0051 | 97 h | no |
+| **~1,750** | **0.0039** | **~7 days** | yes |
+
+So the honest statement is **not** "more seeds would close this". It is: *more
+seeds tighten the bound; no realistic number turns this into a measurement,
+because the effect sits more than an order of magnitude below the run-to-run
+noise.*
+
+*(The per-fit time is measured, not extrapolated — 175 s at the study's
+settings. A first estimate scaled from smaller runs and came out 3× too high,
+which would have made the limitation sound worse than it is.)*
+
+### Why the obvious shortcuts do not work
+
+- **A bigger test set** would cut test-sampling noise — but section 1 already
+  established that **weight initialisation dominates the data draw** (sd 0.097
+  vs 0.037). The noise is in the weights, not the split.
+- **Averaging k inits per condition** cuts that noise by `√k` and costs exactly
+  `k` times more compute. The same trade in a different shape.
+- **Pairing already did what pairing can do** — both arms share the data seed
+  *and* the init seed, and the residual paired sd of 0.0585 against an unpaired
+  init sd of 0.097 is what that bought.
+
+### What does not change
+
+The conclusion stands. Combined with the +0.181 counterfactual, the bound still
+says **the shortcut was available, not necessary** — the model reads nearly as
+much from anatomy and took the marker because it was the cheaper route.
+
+What changes is that the gap list no longer implies an untaken cheap fix. This
+is a real limit of one CPU, stated as one.
+
 ## What is still missing, and why it cannot be closed here
 
 - **No real data.** No ChestX-ray14, no CheXpert, no radiographs — not
@@ -435,9 +488,12 @@ exists to avoid. It is recorded as a specific, closeable gap instead.
 - **The strata are too small to settle the calibration question.** ~135 and
   ~274 studies. Resolving whether a stratum split tracks a shortcut needs a much
   larger test set or a paired design across many more seeds.
-- **The de-confounding result is an upper bound, not a measurement.** Three
-  seeds resolve differences above 0.094 AUROC and the observed difference is
-  0.004. More seeds would close this and were not run.
+- **The de-confounding result is an upper bound, and CANNOT be made a
+  measurement here.** The observed difference is 0.004 against a paired sd of
+  0.0585, so resolving it needs **~1,750 seeds — about 7 days of compute on
+  this machine** (see above). An earlier version of this list said "more seeds
+  would close this and were not run", which implied a cheap fix nobody had
+  bothered with. More seeds tighten the bound; no feasible number closes it.
 - **The cue detectors only work because this project planted the cues.** Three
   thresholds against known geometry. On real radiographs annotations move, vary
   in font and rotation, and support devices are diagnostically real rather than
@@ -476,6 +532,9 @@ exists to avoid. It is recorded as a specific, closeable gap instead.
 | `src/conformal.py` | split conformal, and the stratified coverage check |
 | `run_complete.py` | variance decomposition, de-confounded retrain, conformal |
 | `validate_dicom.py` | pydicom interop both directions; found the uniform-Z gap |
+| `power.py` | what closing the de-confounding gap would actually cost |
+| `more_seeds.py` | re-runs only the seed-limited arm, to tighten the bound |
+| `tests/test_power.py` | 10 tests, no training needed |
 | `tests/test_dicom_interop.py` | 7 tests, incl. reading a file pydicom wrote |
 | `tests/test_conformal.py` | 16 tests: coverage against planted truth, the hidden stratum |
 | `tests/test_serving.py` | 34 tests: calibration against planted truth, cues, the API |
